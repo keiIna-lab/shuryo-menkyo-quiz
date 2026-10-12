@@ -106,8 +106,14 @@ h1, h2, h3 { font-family: var(--serif); font-weight: 700; letter-spacing: 0.02em
 .choice.good { border-color: var(--good); background: #e7f6ee; }
 .choice.bad { border-color: var(--bad); background: #fdeeee; }
 .choice:disabled { cursor: default; }
+.verdict {
+  margin-top: 1rem; padding: 0.8rem 1rem; border-radius: 0.7rem;
+  font-size: 1.15rem; line-height: 1.6;
+}
+.verdict.good { background: #e7f6ee; color: var(--good); }
+.verdict.bad { background: #fdeeee; color: var(--bad); }
 .explain {
-  margin-top: 1rem; padding: 0.9rem 1rem; border-left: 4px solid var(--green);
+  margin-top: 0.7rem; padding: 0.9rem 1rem; border-left: 4px solid var(--green);
   background: white; border-radius: 0.7rem; line-height: 1.7;
 }
 .nav { display: flex; justify-content: space-between; gap: 0.6rem; margin-top: 1rem; flex-wrap: wrap; }

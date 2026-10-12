@@ -121,7 +121,7 @@
       var left = state.endsAt - Date.now();
       el.textContent = formatLeft(left);
       el.classList.toggle("warn", left < 5 * 60 * 1000);
-      if (left <= 0) submitExam(true);
+      if (left <= 0) finishPaper(true);
     }, 250);
   }
 
@@ -174,8 +174,8 @@
     state.notice = "";
     return notice + '<p class="kicker">' + L.escapeHtml(meta.age) + "</p><h1>" + L.escapeHtml(meta.full) + '</h1><p class="lede">使える猟具は' + L.escapeHtml(meta.gear) + "です。共通の法令・鳥獣・保護管理に、この免許の猟具を合わせて出します。</p>" +
       '<div class="modes">' +
-      modeBtn("mock", "模擬試験", "30問・90分。途中の解説はありません。") +
-      modeBtn("exempt", "一部免除", "ほかの免許を持っている人向け。猟具10問・30分。") +
+      modeBtn("mock", "模擬試験", "30問・90分。1問ごとに正誤と解説を出します。") +
+      modeBtn("exempt", "一部免除", "猟具10問・30分。1問ごとに正誤と解説を出します。") +
       modeBtn("practice", "分野別の演習", "項目を選んで、解答のたびに解説を見ます。") +
       modeBtn("retry", "間違えた問題", wrong ? wrong + "問がやり直し待ちです。" : "まだやり直し待ちはありません。") +
       modeBtn("stats", "項目別の成績", sum.total.taken ? sum.total.taken + "問に取り組み、のべ正答率 " + pct(sum.total.rate) + "。" : "まだ記録がありません。") +
@@ -235,16 +235,20 @@
   function quizHtml() {
     var q = qById(state.paper[state.index]);
     if (!q) return '<p class="empty">問題を表示できません。</p>';
-    var practice = state.mode === "practice" || state.mode === "retry";
-    var shown = practice && state.revealed[q.id];
+    var shown = !!state.revealed[q.id];
     var choices = q.choices.map(function (choice, i) {
       var cls = "choice";
-      if (state.picks[q.id] === i) cls += " selected";
+      if (!shown && state.picks[q.id] === i) cls += " selected";
       if (shown && i === q.answer) cls += " good";
       if (shown && state.picks[q.id] === i && i !== q.answer) cls += " bad";
       return '<button class="' + cls + '" type="button" data-pick="' + i + '"' + (shown ? " disabled" : "") + '><span class="mark">' + MARKS[i] + "</span><span>" + L.escapeHtml(choice) + "</span></button>";
     }).join("");
-    var explain = shown ? '<div class="explain"><strong>' + (state.picks[q.id] === q.answer ? "正解です。" : "不正解です。") + "</strong> " + L.escapeHtml(q.explain) + "</div>" : "";
+    var explain = "";
+    if (shown) {
+      var ok = state.picks[q.id] === q.answer;
+      explain = '<div class="verdict ' + (ok ? "good" : "bad") + '" role="status"><strong>' + (ok ? "正解です。" : "不正解です。") + "</strong> 正解は" + MARKS[q.answer] + "です。</div>" +
+        '<div class="explain">' + L.escapeHtml(q.explain) + "</div>";
+    }
     var left = state.endsAt ? '<div class="timer" data-timer>' + formatLeft(state.endsAt - Date.now()) + "</div>" : "<div></div>";
     var title = { mock: "模擬試験", exempt: "一部免除", practice: "分野別の演習", retry: "間違えた問題" }[state.mode] || "演習";
     var invert = q.text.indexOf("誤っている") !== -1 ? " invert" : "";
@@ -258,11 +262,9 @@
       return '<button type="button" data-jump="' + i + '" class="' + cls + '">' + (i + 1) + "</button>";
     }).join("");
     var allDone = state.paper.every(function (id) { return state.revealed[id]; });
-    var primary = practice
-      ? (shown
-        ? '<button class="solid" type="button" data-next>' + (state.index + 1 === state.paper.length ? (allDone ? "結果を見る" : "未解答へ") : "次の問題") + "</button>"
-        : '<button class="solid" type="button" data-reveal' + (state.picks[q.id] == null ? " disabled" : "") + ">解答を見る</button>")
-      : '<button class="solid" type="button" data-submit>提出する</button>';
+    var onLast = state.index + 1 === state.paper.length;
+    var primaryLabel = !shown ? "選択肢を選ぶと判定します" : (onLast ? (allDone ? "結果を見る" : "未解答へ") : "次の問題");
+    var primary = '<button class="solid" type="button" data-next' + (shown ? "" : " disabled") + ">" + primaryLabel + "</button>";
     return '<div class="quiz-head"><div><p class="kicker">' + L.escapeHtml(LIC[state.license].name) + " / " + title + "</p><strong>" + CAT[q.category] + "・" + L.escapeHtml(q.topic) + "</strong></div>" + left + "</div>" +
       '<div class="progress"><span style="width:' + ((state.index + 1) / state.paper.length * 100) + '%"></span></div>' +
       '<p class="sub">' + (state.index + 1) + " / " + state.paper.length + (q.origin === "moe" ? " ・環境省の公表例題" : "") + "</p>" +
@@ -271,7 +273,6 @@
       '<div class="dots" aria-label="問題番号">' + dots + "</div>" +
       '<div class="nav"><button class="ghost" type="button" data-prev' + (state.index === 0 ? " disabled" : "") + ">前へ</button>" +
       '<button class="ghost" type="button" data-go="dash">中断</button>' + primary +
-      (practice ? "" : '<button class="ghost" type="button" data-next' + (state.index + 1 === state.paper.length ? " disabled" : "") + ">次へ</button>") +
       "</div>";
   }
 
@@ -320,29 +321,18 @@
     return Math.round(rate * 1000) / 10 + "%";
   }
 
-  function submitExam(fromTimer) {
+  function finishPaper(fromTimer) {
     if (state.submitted) return;
-    if (!fromTimer) {
-      var blank = state.paper.filter(function (id) { return state.picks[id] == null; }).length;
-      var message = blank ? blank + "問が無解答です。無解答は不正解として提出します。" : "解答を提出します。";
-      if (!window.confirm(message)) return;
-    }
+    state.paper.forEach(function (id) {
+      if (state.revealed[id]) return;
+      state.revealed[id] = true;
+      record(id, false);
+    });
     state.submitted = true;
+    state.scored = true;
     state.endsAt = null;
-    if (!state.scored) {
-      paperQuestions().forEach(function (q) {
-        record(q.id, state.picks[q.id] === q.answer);
-        state.revealed[q.id] = true;
-      });
-      state.scored = true;
-    }
     state.view = "result";
-    render();
-  }
-
-  function finishPractice() {
-    state.view = "result";
-    state.submitted = true;
+    if (fromTimer) state.notice = "";
     render();
   }
 
@@ -367,8 +357,8 @@
         return;
       }
       if (el.dataset.go) {
-        if (el.dataset.go === "dash" && state.view === "quiz" && !state.submitted && (state.mode === "mock" || state.mode === "exempt")) {
-          if (!window.confirm("この試験を中断すると、いまの解答は成績に残りません。")) return;
+        if (el.dataset.go === "dash" && state.view === "quiz" && !state.submitted) {
+          if (!window.confirm("中断します。解答済みの問題は成績に残ります。")) return;
         }
         state.view = el.dataset.go === "home" ? "home" : el.dataset.go;
         if (el.dataset.go === "home") state.license = null;
@@ -420,23 +410,22 @@
       }
       if (el.dataset.pick != null && !state.revealed[state.paper[state.index]]) {
         state.picks[state.paper[state.index]] = Number(el.dataset.pick);
-        render();
+        revealCurrent();
         return;
       }
-      if (el.dataset.reveal != null) { revealCurrent(); return; }
       if (el.dataset.prev != null) {
         state.index = Math.max(0, state.index - 1);
         render();
         return;
       }
       if (el.dataset.next != null) {
-        var practiceMode = state.mode === "practice" || state.mode === "retry";
-        if (practiceMode && state.index + 1 === state.paper.length && state.revealed[state.paper[state.index]]) {
+        if (!state.revealed[state.paper[state.index]]) return;
+        if (state.index + 1 === state.paper.length) {
           var missing = -1;
           for (var mi = 0; mi < state.paper.length; mi++) {
             if (!state.revealed[state.paper[mi]]) { missing = mi; break; }
           }
-          if (missing === -1) finishPractice();
+          if (missing === -1) finishPaper(false);
           else { state.index = missing; render(); }
           return;
         }
@@ -449,7 +438,6 @@
         render();
         return;
       }
-      if (el.dataset.submit != null) { submitExam(false); return; }
       if (el.dataset.export != null) exportStats();
       if (el.dataset.reset != null) resetStats();
     };
@@ -486,7 +474,7 @@
     var n = { Digit1: 0, Digit2: 1, Digit3: 2, Numpad1: 0, Numpad2: 1, Numpad3: 2 }[event.code];
     if (n != null && !state.revealed[state.paper[state.index]]) {
       state.picks[state.paper[state.index]] = n;
-      render();
+      revealCurrent();
     }
   });
 
